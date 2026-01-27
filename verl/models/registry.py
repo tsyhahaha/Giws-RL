@@ -21,7 +21,16 @@ import torch.nn as nn
 # TODO(sgm): HF may supported more than listed here, we should add more after testing
 from transformers import LlamaConfig, MistralConfig, GemmaConfig, Qwen2Config
 
+try:
+    from transformers import Qwen3Config
+    _QWEN3_AVAILABLE = True
+except ImportError:
+    _QWEN3_AVAILABLE = False
+    Qwen3Config = None
+
 _REOVEPAD_MODELS = {'llama': LlamaConfig, 'mistral': MistralConfig, 'gemma': GemmaConfig, 'qwen2': Qwen2Config}
+if _QWEN3_AVAILABLE:
+    _REOVEPAD_MODELS['qwen3'] = Qwen3Config
 
 
 def check_model_support_rmpad(model_type: str):

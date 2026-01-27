@@ -31,9 +31,16 @@ def apply_monkey_patch_to_qwen2():
     Qwen2FlashAttention2.forward = qwen2_flash_attn_forward
 
 
+def apply_monkey_patch_to_qwen3():
+    from transformers.models.qwen3.modeling_qwen3 import Qwen3FlashAttention2
+    from verl.models.transformers.qwen3 import qwen3_flash_attn_forward
+    Qwen3FlashAttention2.forward = qwen3_flash_attn_forward
+
+
 _PATCH_NAME_TO_FUNC = {
     'llama': apply_monkey_patch_to_llama,
     'qwen2': apply_monkey_patch_to_qwen2,
+    'qwen3': apply_monkey_patch_to_qwen3,
 }
 
 from transformers import PretrainedConfig
