@@ -30,7 +30,8 @@ from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
 from vllm.model_executor.models.interfaces import supports_lora, supports_multimodal
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.prompt_adapter.worker_manager import LRUCacheWorkerPromptAdapterManager
-from vllm.utils import DeviceMemoryProfiler, is_hip, supports_dynamo
+from vllm.platforms import current_platform
+from vllm.utils import DeviceMemoryProfiler, supports_dynamo
 from vllm.worker.model_runner import ModelRunner as VllmModelRunner
 
 from .model_loader import get_model
@@ -121,7 +122,7 @@ class ModelRunner(VllmModelRunner):
             )
             self.model = self.prompt_adapter_manager.create_prompt_adapter_manager(self.model)
 
-        if self.kv_cache_dtype == "fp8" and is_hip():
+        if self.kv_cache_dtype == "fp8" and current_platform.is_rocm():
             if self.model_config.quantization_param_path is not None:
                 if callable(getattr(self.model, "load_kv_cache_scales", None)):
                     warnings.warn(

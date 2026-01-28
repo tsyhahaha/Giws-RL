@@ -23,7 +23,7 @@ from transformers import PretrainedConfig
 # Add for verl
 from vllm.config import ModelConfig
 from vllm.logger import init_logger
-from vllm.utils import is_hip
+from vllm.platforms import current_platform
 
 if TYPE_CHECKING:
     from vllm.model_executor.model_loader.loader import BaseModelLoader
@@ -96,7 +96,7 @@ class LoadConfig:
         self.load_format = LoadFormat(load_format)
 
         rocm_not_supported_load_format: List[str] = []
-        if is_hip() and load_format in rocm_not_supported_load_format:
+        if current_platform.is_rocm() and load_format in rocm_not_supported_load_format:
             rocm_supported_load_format = [
                 f for f in LoadFormat.__members__ if (f not in rocm_not_supported_load_format)
             ]
