@@ -11,3 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# vLLM 0.8.5 compatibility layer for verl
+
+from .arg_utils import EngineArgs
+from .config import LoadConfig, LoadFormat, ModelConfig
+from .llm_engine_sp import LLMEngine

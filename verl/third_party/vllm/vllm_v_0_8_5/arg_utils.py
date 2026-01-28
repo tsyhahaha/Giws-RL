@@ -12,19 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Adapted from https://github.com/vllm-project/vllm/blob/main/vllm/engine/arg_utils.py
+#
+# NOTE: Adapted for vLLM 0.8.5 - Returns VllmConfig instead of EngineConfig
 
 import os
 from dataclasses import dataclass
 
 from transformers import PretrainedConfig
-from vllm.config import EngineConfig
-from vllm.engine.arg_utils import EngineArgs
+from vllm.config import VllmConfig
+from vllm.engine.arg_utils import EngineArgs as VllmEngineArgs
+from vllm.usage.usage_lib import UsageContext
 
 from .config import LoadConfig, ModelConfig
 
 
 @dataclass
-class EngineArgs(EngineArgs):
+class EngineArgs(VllmEngineArgs):
     model_hf_config: PretrainedConfig = None  # for verl
 
     def __post_init__(self):
@@ -67,12 +70,18 @@ class EngineArgs(EngineArgs):
             ignore_patterns=self.ignore_patterns,
         )
 
-    def create_engine_config(self) -> EngineConfig:
-        engine_config = super().create_engine_config()
+    def create_engine_config(self, usage_context: UsageContext = UsageContext.ENGINE_CONTEXT) -> VllmConfig:
+        """Create VllmConfig from engine args for vLLM 0.8.5."""
+        # Call parent's create_engine_config which returns VllmConfig in 0.8.5
+        vllm_config = super().create_engine_config(usage_context)
 
-        # NOTE[VERL]: Use the world_size set by torchrun
+        # Override with verl-specific configs
+        vllm_config.model_config = self.create_model_config()
+        vllm_config.load_config = self.create_load_config()
+
+        # Use the world_size set by torchrun
         world_size = int(os.getenv("WORLD_SIZE", "-1"))
         assert world_size != -1, "The world_size is set to -1, not initialized by TORCHRUN"
-        engine_config.parallel_config.world_size = world_size
+        vllm_config.parallel_config.world_size = world_size
 
-        return engine_config
+        return vllm_config

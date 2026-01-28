@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # Adapted from https://github.com/vllm-project/vllm/blob/main/vllm/worker/model_runner.py
+#
+# NOTE: Adapted for vLLM 0.8.5 - Uses VllmConfig instead of separate config objects
 
 import warnings
 from enum import IntEnum
@@ -21,82 +23,52 @@ import torch
 import torch.nn as nn
 import vllm.envs as envs
 from vllm.compilation.levels import CompilationLevel
-from vllm.config import (
-    CacheConfig,
-    DeviceConfig,
-    LoadConfig,
-    LoRAConfig,
-    ModelConfig,
-    ObservabilityConfig,
-    ParallelConfig,
-    PromptAdapterConfig,
-    SchedulerConfig,
-)
+from vllm.config import VllmConfig
 from vllm.inputs import INPUT_REGISTRY, InputRegistry
 from vllm.logger import init_logger
 from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
-from vllm.model_executor.models.interfaces import supports_lora
+from vllm.model_executor.models.interfaces import supports_lora, supports_multimodal
 from vllm.multimodal import MULTIMODAL_REGISTRY, MultiModalRegistry
 from vllm.prompt_adapter.worker_manager import LRUCacheWorkerPromptAdapterManager
 from vllm.utils import DeviceMemoryProfiler, is_hip, supports_dynamo
-from vllm.worker.model_runner import ModelRunner
+from vllm.worker.model_runner import ModelRunner as VllmModelRunner
 
-from .config import LoadConfig, ModelConfig
 from .model_loader import get_model
 
 logger = init_logger(__name__)
 
 
-# How batches are constructed.
 class BatchType(IntEnum):
-    # Every batch is prefill.
     PREFILL = 0
-    # Every batch is decode.
     DECODE = 1
-    # Batch is a mixture of prefill and decode.
     MIXED = 2
 
 
-class ModelRunner(ModelRunner):
+class ModelRunner(VllmModelRunner):
+    """Model runner adapted for vLLM 0.8.5 VllmConfig API."""
 
     def __init__(
         self,
         model: Union[nn.Module, Dict],  # [verl] model itself or its parameter dict
-        model_config: ModelConfig,
-        parallel_config: ParallelConfig,
-        scheduler_config: SchedulerConfig,
-        device_config: DeviceConfig,
-        cache_config: CacheConfig,
-        load_config: LoadConfig,
-        lora_config: Optional[LoRAConfig],
+        vllm_config: VllmConfig,
         kv_cache_dtype: Optional[str] = "auto",
         is_driver_worker: bool = False,
-        prompt_adapter_config: Optional[PromptAdapterConfig] = None,
         return_hidden_states: bool = False,
-        observability_config: Optional[ObservabilityConfig] = None,
         input_registry: InputRegistry = INPUT_REGISTRY,
         mm_registry: MultiModalRegistry = MULTIMODAL_REGISTRY,
     ):
-
+        # Initialize parent with vllm_config
         super().__init__(
-            model_config,
-            parallel_config,
-            scheduler_config,
-            device_config,
-            cache_config,
-            load_config,
-            lora_config,
-            kv_cache_dtype,
-            is_driver_worker=True,  # a hack
-            prompt_adapter_config=prompt_adapter_config,
+            vllm_config=vllm_config,
+            kv_cache_dtype=kv_cache_dtype,
+            is_driver_worker=True,  # a hack for verl
             return_hidden_states=return_hidden_states,
-            observability_config=observability_config,
             input_registry=input_registry,
             mm_registry=mm_registry,
         )
 
-        # NOTE(sgm): add for verl
-        self.model = model  # this will be replaced by get_model()
+        # Store model for verl's custom loading
+        self.model = model
 
     def load_model(self) -> None:
         logger.info("Starting to load model %s...", self.model_config.model)
@@ -119,10 +91,10 @@ class ModelRunner(ModelRunner):
             assert supports_lora(self.model), f"{self.model.__class__.__name__} does not support LoRA yet."
 
             if supports_multimodal(self.model):
-                logger.warning("Regarding multimodal models, vLLM currently "
-                               "only supports adding LoRA to language model.")
-            # It's necessary to distinguish between the max_position_embeddings
-            # of VLMs and LLMs.
+                logger.warning(
+                    "Regarding multimodal models, vLLM currently only supports adding LoRA to language model."
+                )
+
             if hasattr(self.model.config, "max_position_embeddings"):
                 max_pos_embeddings = self.model.config.max_position_embeddings
             else:
@@ -150,15 +122,11 @@ class ModelRunner(ModelRunner):
             self.model = self.prompt_adapter_manager.create_prompt_adapter_manager(self.model)
 
         if self.kv_cache_dtype == "fp8" and is_hip():
-            # Currently only ROCm accepts kv-cache scaling factors
-            # via quantization_param_path and this will be deprecated
-            # in the future.
             if self.model_config.quantization_param_path is not None:
                 if callable(getattr(self.model, "load_kv_cache_scales", None)):
                     warnings.warn(
-                        "Loading kv cache scaling factor from JSON is "
-                        "deprecated and will be removed. Please include "
-                        "kv cache scaling factors in the model checkpoint.",
+                        "Loading kv cache scaling factor from JSON is deprecated and will be removed. "
+                        "Please include kv cache scaling factors in the model checkpoint.",
                         FutureWarning,
                         stacklevel=2,
                     )
@@ -166,14 +134,14 @@ class ModelRunner(ModelRunner):
                     logger.info("Loaded KV cache scaling factors from %s", self.model_config.quantization_param_path)
                 else:
                     raise RuntimeError(
-                        "Using FP8 KV cache and scaling factors provided but "
-                        "model %s does not support loading scaling factors.",
-                        self.model.__class__,
+                        f"Using FP8 KV cache and scaling factors provided but model {self.model.__class__} "
+                        "does not support loading scaling factors."
                     )
             else:
-                logger.warning("Using FP8 KV cache but no scaling factors "
-                               "provided. Defaulting to scaling factors of 1.0. "
-                               "This may lead to less accurate results!")
+                logger.warning(
+                    "Using FP8 KV cache but no scaling factors provided. "
+                    "Defaulting to scaling factors of 1.0. This may lead to less accurate results!"
+                )
 
         if envs.VLLM_TORCH_COMPILE_LEVEL == CompilationLevel.DYNAMO_AS_IS and supports_dynamo():
             from vllm.plugins import get_torch_compile_backend
